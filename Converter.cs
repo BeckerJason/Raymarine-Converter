@@ -14,100 +14,87 @@ namespace RaymarineConverter
         public static void WriteFsh(string outputPath, string groupName, List<Wp> waypoints, bool includeRoute, CultureInfo culture)
         {
             groupName = Helper.SanitizeName(groupName);
-
-            //
-            // 1. Build waypoint binary block (matches RayTech field ordering we observed)
-            //
-            var wpStream = new MemoryStream();
-            var w = new BinaryWriter(wpStream);
-
             double now = DateTime.UtcNow.ToOADate();
+
+            //
+            // ---------- WAYPOINT OBJECT ----------
+            //
+            var wpObject = new MemoryStream();
+            var wpw = new BinaryWriter(wpObject);
+
+            // REQUIRED HEADER
+            wpw.Write((ushort)waypoints.Count); // record count
+            wpw.Write((ushort)0);               // reserved
 
             for (int i = 0; i < waypoints.Count; i++)
             {
                 var wp = waypoints[i];
-
                 string name = Helper.SanitizeName(wp.Name);
                 string guid = $"GUID-{(i + 1):0000}";
 
-                // --- This structure layout matches real .fsh blocks we examined ---
+                wpw.Write(BitConverter.GetBytes(wp.Lat));
+                wpw.Write(BitConverter.GetBytes(wp.Lon));
+                wpw.Write(BitConverter.GetBytes(now));
 
-                // Lat / Lon / Time
-                w.Write(Helper.DoubleBytes(wp.Lat));
-                w.Write(Helper.DoubleBytes(wp.Lon));
-                w.Write(Helper.DoubleBytes(now));
+                for (int j = 0; j < 6; j++)     // unused doubles RayTech also writes
+                    wpw.Write(BitConverter.GetBytes(0.0));
 
-                // Placeholder doubles (range/bearing/etc) — RayTech writes zeros too
-                for (int j = 0; j < 6; j++)
-                    w.Write(Helper.DoubleBytes(0.0));
+                wpw.Write((byte)1);             // visible flag
+                wpw.Write((byte)0);             // locked flag
 
-                // Flags
-                w.Write((byte)1);    // visible
-                w.Write((byte)0);    // locked flag
-
-                // Name & Group & GUID (16, 16, 36 bytes)
-                w.Write(Helper.GetBytes(name, 16));
-                w.Write(Helper.GetBytes(groupName, 16));
-                w.Write(Helper.GetBytes(guid, 36));
+                wpw.Write(Helper.GetBytes(name, 16));
+                wpw.Write(Helper.GetBytes(groupName, 16));
+                wpw.Write(Helper.GetBytes(guid, 36));
             }
 
-            byte[] waypointBlock = Helper.PadTo512(wpStream.ToArray());
+            byte[] waypointBlock = Helper.PadTo512(wpObject.ToArray());
 
 
             //
-            // 2. Build route block (if requested)
+            // ---------- ROUTE OBJECT ----------
             //
             byte[] routeBlock = Array.Empty<byte>();
 
             if (includeRoute && waypoints.Count > 0)
             {
                 var rs = new MemoryStream();
-                var br = new BinaryWriter(rs);
+                var rw = new BinaryWriter(rs);
 
-                string routeGuid = "ROUTE-0001";
+                rw.Write((ushort)1);  // ONE route
+                rw.Write((ushort)0);  // reserved
+
                 string routeName = groupName;
+                string routeGuid = "ROUTE-0001";
 
-                // Route Name (16)
-                br.Write(Helper.GetBytes(routeName, 16));
+                rw.Write(Helper.GetBytes(routeName, 16));
+                rw.Write((byte)1);         // visible
+                rw.Write((byte)1);         // marked for transfer
+                rw.Write((ushort)waypoints.Count);
+                rw.Write(Helper.GetBytes(routeGuid, 36));
 
-                // Flags
-                br.Write((byte)1); // visible
-                br.Write((byte)1); // marked for transfer
-
-                // Number of marks
-                br.Write((ushort)waypoints.Count);
-
-                // Route GUID (36)
-                br.Write(Helper.GetBytes(routeGuid, 36));
-
-                // Mark names (16 bytes each)
                 foreach (var wp in waypoints)
-                    br.Write(Helper.GetBytes(Helper.SanitizeName(wp.Name), 16));
+                    rw.Write(Helper.GetBytes(Helper.SanitizeName(wp.Name), 16));
 
                 routeBlock = Helper.PadTo512(rs.ToArray());
             }
 
 
             //
-            // 3. Build the flash DIRECTORY
+            // ---------- DIRECTORY ----------
             //
             var dir = new MemoryStream();
             var bw = new BinaryWriter(dir);
 
-            // "RL90 FLASH FILE\n"
             bw.Write(Helper.GetBytes("RL90 FLASH FILE", 16));
 
-            // Number of objects
-            ushort objectCount = (ushort)(includeRoute ? 2 : 1);
-            bw.Write(objectCount);
-
-            // Reserved pad
+            ushort objCount = (ushort)(includeRoute ? 2 : 1);
+            bw.Write(objCount);
             bw.Write((ushort)0);
 
-            int offset = 512; // data starts after header
+            int offset = 512;
 
-            // Entry 0 = Waypoints object
-            bw.Write((ushort)1);   // object type (1=waypoints in our samples)
+            // type 0x110 — waypoints (observed in RayTech exports)
+            bw.Write((ushort)0x0110);
             bw.Write(offset);
             bw.Write(waypointBlock.Length);
 
@@ -115,22 +102,23 @@ namespace RaymarineConverter
 
             if (includeRoute)
             {
-                // Entry 1 = Route object
-                bw.Write((ushort)2);   // route object type ID observed
+                // type 0x0120 — route block (observed)
+                bw.Write((ushort)0x0120);
                 bw.Write(offset);
                 bw.Write(routeBlock.Length);
+
                 offset += routeBlock.Length;
             }
 
-            byte[] directoryBlock = Helper.PadTo512(dir.ToArray());
+            byte[] directory = Helper.PadTo512(dir.ToArray());
 
 
             //
-            // 4. Assemble entire FSH file
+            // ---------- ASSEMBLE ----------
             //
-            using var fs = new FileStream(outputPath, FileMode.Create, FileAccess.Write);
+            using var fs = new FileStream(outputPath, FileMode.Create);
 
-            fs.Write(directoryBlock);
+            fs.Write(directory);
             fs.Write(waypointBlock);
 
             if (includeRoute)
