@@ -1,6 +1,9 @@
 # Raymarine-Converter
 Convert Files to Raymarine readable Files
 
+# Use
+`RaymarineConvert input.csv|input.gpx output.txt waypointgroupname`
+
 # Raymarine RayTech Navigator Use
 ## Importing TXT for conversion to RWF
 ### Raymarine expects your .TXT file in C:\Archive or any other root\Archive
