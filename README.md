@@ -1,2 +1,12 @@
 # Raymarine-Converter
 Convert Files to Raymarine readable Files
+
+# Raymarine RayTech Navigator Use
+## Importing TXT for conversion to RWF
+### Raymarine expects your .TXT file in C:\Archive or any other root\Archive
+- File
+- Import/Export Routes and Waypoints
+- Import Routes and Waypoints
+- Import from File
+- Import from Comma Delimited File (even though the files are .TXT)
+- Select your TXT file
