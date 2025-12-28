@@ -6,6 +6,8 @@ using System.Xml.Linq;
 
 class Program
 {
+    public record Wp(double Lat, double Lon, string Name);
+
     static void Main(string[] args)
     {
         if (args.Length < 3)
@@ -25,8 +27,6 @@ class Program
         }
 
         var culture = CultureInfo.InvariantCulture;
-
-        // 1) Read input as a simple list of waypoints
         var waypoints = LoadWaypoints(inputPath, culture);
 
         if (waypoints.Count == 0)
@@ -37,38 +37,43 @@ class Program
 
         string outExt = Path.GetExtension(outputPath).ToLowerInvariant();
 
+        bool includeRoute = false;
+
         if (outExt == ".rwf")
         {
-            WriteRwf(outputPath, waypointGroupName, waypoints, culture);
+            Console.Write("Do you want to generate a route that follows the waypoints in order? (y/n): ");
+            var key = Console.ReadKey();
+            Console.WriteLine();
+            includeRoute = (key.KeyChar == 'y' || key.KeyChar == 'Y');
+
+            WriteRwf(outputPath, waypointGroupName, waypoints, includeRoute, culture);
         }
         else
         {
-            // default: RayTech TXT file
             WriteRaytechTxt(outputPath, waypointGroupName, waypoints, culture);
         }
 
-        Console.WriteLine($"Done! Wrote {waypoints.Count} waypoints to {outputPath}");
+        Console.WriteLine($"Done! Wrote {waypoints.Count} waypoint(s) to {outputPath}");
     }
 
-    // ---------- waypoint record ----------
-    public record Wp(double Lat, double Lon, string Name);
-
-    // ---------- Load from CSV or GPX ----------
+    // -------- Load CSV / GPX --------
 
     static List<Wp> LoadWaypoints(string inputPath, CultureInfo culture)
     {
-        var waypoints = new List<Wp>();
+        var list = new List<Wp>();
         string ext = Path.GetExtension(inputPath).ToLowerInvariant();
 
         if (ext == ".csv")
         {
             Console.WriteLine("Reading CSV...");
+
             foreach (var raw in File.ReadAllLines(inputPath))
             {
                 var line = raw.Trim();
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
                 var parts = line.Split(',');
+
                 if (parts.Length < 3)
                 {
                     Console.WriteLine("Skipping invalid line: " + line);
@@ -79,12 +84,13 @@ class Program
                 double lon = double.Parse(parts[1], culture);
                 string name = parts[2].Trim();
 
-                waypoints.Add(new Wp(lat, lon, name));
+                list.Add(new Wp(lat, lon, name));
             }
         }
         else if (ext == ".gpx")
         {
             Console.WriteLine("Reading GPX...");
+
             XDocument doc = XDocument.Load(inputPath);
             XNamespace ns = doc.Root.GetDefaultNamespace();
 
@@ -92,13 +98,12 @@ class Program
             {
                 double lat = double.Parse(w.Attribute("lat").Value, culture);
                 double lon = double.Parse(w.Attribute("lon").Value, culture);
-
                 string name =
                     (string)w.Element(ns + "name") ??
                     (string)w.Element(ns + "desc") ??
                     "WP";
 
-                waypoints.Add(new Wp(lat, lon, name.Trim()));
+                list.Add(new Wp(lat, lon, name.Trim()));
             }
         }
         else
@@ -106,10 +111,10 @@ class Program
             Console.WriteLine("Unsupported input type (use .csv or .gpx).");
         }
 
-        return waypoints;
+        return list;
     }
 
-    // ---------- Sanitize waypoint name for Raymarine ----------
+    // -------- Helpers --------
 
     static string SanitizeName(string name)
     {
@@ -118,21 +123,18 @@ class Program
 
         name = name.Trim();
 
-        // Raymarine tends to like <= 16 characters
         if (name.Length > 16)
             name = name.Substring(0, 16);
 
-        // Commas would break the format
         return name.Replace(",", " ");
     }
 
-    // ---------- Existing RayTech TXT writer ----------
+    // -------- RayTech TXT Writer --------
 
     static void WriteRaytechTxt(string outputPath, string groupName, List<Wp> waypoints, CultureInfo culture)
     {
         var output = new List<string>();
 
-        // Header (first 10 lines)
         output.Add("*********** RAYTECH WAPOINT AND ROUTE TXT FILE --DO NOT EDIT THIS LINE!!!! ***********");
         output.Add("*********** The first 10 lines of this file are reserved *****************");
         output.Add("*********** The waypoint data is comma delimited in the order of: ***********");
@@ -144,8 +146,8 @@ class Program
         output.Add("*****************************************************************************************************************");
         output.Add("************************************ END HEADER ****************************************************************");
 
+        double time = DateTime.UtcNow.ToOADate();
         int guidCounter = 1;
-        double time = DateTime.UtcNow.ToOADate(); // similar style number, but any double works
 
         foreach (var wp in waypoints)
         {
@@ -159,8 +161,7 @@ class Program
                 wp.Lat,
                 wp.Lon,
                 time,
-                guid
-            );
+                guid);
 
             output.Add(line);
         }
@@ -168,21 +169,23 @@ class Program
         File.WriteAllLines(outputPath, output);
     }
 
-    // ---------- NEW: Raymarine .rwf writer ----------
+    // -------- RWF Writer (with optional route) --------
 
-    static void WriteRwf(string outputPath, string groupName, List<Wp> waypoints, CultureInfo culture)
+    static void WriteRwf(string outputPath, string groupName, List<Wp> waypoints, bool includeRoute, CultureInfo culture)
     {
         var output = new List<string>();
-        int i = 0;
         double time = DateTime.UtcNow.ToOADate();
 
-        foreach (var wp in waypoints)
+        // --- Waypoints ---
+        for (int i = 0; i < waypoints.Count; i++)
         {
+            var wp = waypoints[i];
             string guid = $"GUID-{(i + 1):0000}";
             string name = SanitizeName(wp.Name);
+            string loc = SanitizeName(groupName);   // clamp / clean group name too
 
             output.Add($"[Wp{i}]");
-            output.Add($"Loc={groupName}");
+            output.Add($"Loc={loc}");
             output.Add($"Name={name}");
             output.Add(string.Format(culture, "Lat={0:0.000000000000000}", wp.Lat));
             output.Add(string.Format(culture, "Long={0:0.000000000000000}", wp.Lon));
@@ -196,17 +199,44 @@ class Program
             output.Add("RelSet=1");
             output.Add("RcCount=1");
             output.Add("RcRadius=0.000000000000000");
-            output.Add("Show=1");
+            output.Add("Show=1"); // or 0 if you want them hidden by default
             output.Add("RcShow=0");
             output.Add("SeaTemp=-32678.000000000000000");
             output.Add("Depth=65535.000000000000000");
             output.Add(string.Format(culture, "Time={0:0.000000000000000}", time));
             output.Add($"GUID={guid}");
-            output.Add(""); // blank line between waypoints
+            output.Add(""); // blank line between Wp sections (optional but tidy)
+        }
 
-            i++;
+        // --- Route ---
+        if (includeRoute && waypoints.Count > 0)
+        {
+            string routeName = SanitizeName(groupName);  // e.g. "LIS" / "Long Island Soun"
+
+            output.Add("[Rt0]");
+            output.Add($"Name={routeName}");
+            output.Add("Visible=1");               // your sample had 0; set 1 if you want it shown
+            output.Add("Guid=ROUTE-0001");         // or any GUID-style string you like
+
+            for (int i = 0; i < waypoints.Count; i++)
+            {
+                string mkName = SanitizeName(waypoints[i].Name);
+
+                output.Add($"Mk{i}={mkName}");
+                output.Add($"Cog{i}=0.000000000000000");
+                output.Add($"Eta{i}=0.000000000000000");
+                output.Add($"Length{i}=0.000000000000000");
+                output.Add($"PredictedDrift{i}=0.000000000000000");
+                output.Add($"PredictedSet{i}=0.000000000000000");
+                output.Add($"PredictedSog{i}=0.000000000000000");
+                output.Add($"PredictedTime{i}=0.000000000000000");
+                output.Add($"PredictedTwa{i}=0.000000000000000");
+                output.Add($"PredictedTwd{i}=0.000000000000000");
+                output.Add($"PredictedTws{i}=0.000000000000000");
+            }
         }
 
         File.WriteAllLines(outputPath, output);
     }
+
 }
