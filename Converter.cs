@@ -6,11 +6,63 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 using static Program;
+using static RaymarineConverter.FileConverter;
 
 namespace RaymarineConverter
 {
     internal static class FileConverter
     {
+        public record Route(string Name, List<Wp> Points);
+        public static (List<Wp> Waypoints, List<Route> Routes)
+        LoadGpx(string inputPath, CultureInfo culture)
+        {
+            var waypoints = new List<Wp>();
+            var routes = new List<Route>();
+
+            XDocument doc = XDocument.Load(inputPath);
+
+            // --- Standalone waypoints ---
+            foreach (var w in doc.Descendants().Where(e => e.Name.LocalName == "wpt"))
+            {
+                double lat = double.Parse(w.Attribute("lat")!.Value, culture);
+                double lon = double.Parse(w.Attribute("lon")!.Value, culture);
+
+                string name =
+                    (string)w.Elements().FirstOrDefault(e => e.Name.LocalName == "name") ??
+                    "WP";
+
+                waypoints.Add(new Wp(lat, lon, name.Trim()));
+            }
+
+            // --- Named tracks -> routes ---
+            foreach (var trk in doc.Descendants().Where(e => e.Name.LocalName == "trk"))
+            {
+                string trkName =
+                    (string)trk.Elements().FirstOrDefault(e => e.Name.LocalName == "name") ??
+                    "";
+
+                if (trkName.Equals("Active Log", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var pts = new List<Wp>();
+                int i = 1;
+
+                foreach (var pt in trk.Descendants().Where(e => e.Name.LocalName == "trkpt"))
+                {
+                    double lat = double.Parse(pt.Attribute("lat")!.Value, culture);
+                    double lon = double.Parse(pt.Attribute("lon")!.Value, culture);
+
+                    pts.Add(new Wp(lat, lon, $"{trkName}-{i:000}"));
+                    i++;
+                }
+
+                if (pts.Count > 0)
+                    routes.Add(new Route(trkName.Trim(), pts));
+            }
+
+            return (waypoints, routes);
+        }
+
         public static void WriteFsh(string outputPath, string groupName, List<Wp> waypoints, bool includeRoute, CultureInfo culture)
         {
             groupName = Helper.SanitizeName(groupName);
@@ -126,6 +178,54 @@ namespace RaymarineConverter
         }
         // -------- RayTech TXT Writer --------
 
+        public static void WriteRaytechTxtWithRoutes( string outputPath,string groupName,List<Wp> waypoints,List<Route> routes,     CultureInfo culture)
+        {
+            var output = new List<string>();
+
+            output.Add("*********** RAYTECH WAPOINT AND ROUTE TXT FILE --DO NOT EDIT THIS LINE!!!! ***********");
+            output.Add("*********** The first 10 lines of this file are reserved *****************");
+            output.Add("*********** The waypoint data is comma delimited in the order of: ***********");
+            output.Add("*********** Loc,Name,Lat,Long,Rng,Bear,Bmp,Fixed,Locked,Notes,Rel,RelSet,RcCount,RcRadius,Show,RcShow,SeaTemp,Depth,Time,MarkedForTransfer,GUID*********");
+            output.Add("*********** Following the waypoint data is the route data: ********");
+            output.Add("*********** Route data is also comma delimited in the order of:***********");
+            output.Add("*********** RouteName,Visible,MarkedForTransfer,NumMarks, Guid***********");
+            output.Add("*********** MarkName,Cog,Eta,Length,PredictedDrift,PredictedSet,PredictedSog,PredictedTime,PredictedTwa,PredictedTwd,PredictedTws***********");
+            output.Add("*****************************************************************************************************************");
+            output.Add("************************************ END HEADER ****************************************************************");
+
+            double time = DateTime.UtcNow.ToOADate();
+            int guidCounter = 1;
+
+            // --- Waypoints ---
+            foreach (var wp in waypoints)
+            {
+                string guid = $"GUID-{guidCounter++:0000}";
+
+                output.Add(string.Format(culture,
+                    "{0},{1},{2:0.000000000000000},{3:0.000000000000000},0,0,3,1,0,,,1,1,0,1,0,-32678,65535,{4:0.000000000000000},1,{5}",
+                    groupName,
+                    Helper.SanitizeName(wp.Name),
+                    wp.Lat,
+                    wp.Lon,
+                    time,
+                    guid));
+            }
+
+            // --- Routes ---
+            int r = 0;
+            foreach (var rt in routes)
+            {
+                output.Add($"{Helper.SanitizeName(rt.Name)},1,1,{rt.Points.Count},ROUTE-{r:000}");
+
+                foreach (var wp in rt.Points)
+                    output.Add($"{Helper.SanitizeName(wp.Name)},0,0,0,0,0,0,0,0,0,0");
+
+                r++;
+            }
+
+
+            File.WriteAllLines(outputPath, output);
+        }
         public static void WriteRaytechTxt(string outputPath, string groupName, List<Wp> waypoints, CultureInfo culture)
         {
             var output = new List<string>();
@@ -233,6 +333,112 @@ namespace RaymarineConverter
 
             File.WriteAllLines(outputPath, output);
         }
+        public static void WriteRwfSeperateRoutes(
+    string outputPath,
+    string groupName,
+    List<Wp> waypoints,   // not used here, but kept for signature compatibility
+    List<Route> routes,
+    CultureInfo culture)
+        {
+            var output = new List<string>();
+            double time = DateTime.UtcNow.ToOADate();
+
+            // ---- FILTER ROUTES ----
+            var validRoutes = routes
+                .Where(r => !r.Name.Contains("ACTIVE", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            // ---- COLLECT WAYPOINTS USED BY ROUTES ----
+            var routeWaypoints = validRoutes
+                .SelectMany(r => r.Points)
+                .ToList();
+
+            // ---- ASSIGN STABLE WAYPOINT NAMES ----
+            var wpNameMap = new Dictionary<Wp, string>();
+            int wpIndex = 1;
+
+            foreach (var wp in routeWaypoints)
+            {
+                if (!wpNameMap.ContainsKey(wp))
+                {
+                    // Ensure name uniqueness & RayTech safety
+                    string baseName = Helper.SanitizeName(wp.Name);
+                    string finalName = baseName;
+
+                    if (wpNameMap.Values.Contains(finalName))
+                        finalName = $"{baseName}-{wpIndex:000}";
+
+                    wpNameMap[wp] = finalName;
+                    wpIndex++;
+                }
+            }
+
+            // ---- WRITE WAYPOINTS FIRST ----
+            int wpCounter = 0;
+
+            foreach (var kv in wpNameMap)
+            {
+                var wp = kv.Key;
+                string name = kv.Value;
+                string guid = $"GUID-{++wpCounter:0000}";
+
+                output.Add($"[Wp{wpCounter - 1}]");
+                output.Add($"Loc={Helper.SanitizeName(groupName)}");
+                output.Add($"Name={name}");
+                output.Add(string.Format(culture, "Lat={0:0.000000000000000}", wp.Lat));
+                output.Add(string.Format(culture, "Long={0:0.000000000000000}", wp.Lon));
+                output.Add("Rng=0.000000000000000");
+                output.Add("Bear=0.000000000000000");
+                output.Add("Bmp=3");
+                output.Add("Fixed=1");
+                output.Add("Locked=0");
+                output.Add("Notes=");
+                output.Add("Rel=");
+                output.Add("RelSet=1");
+                output.Add("RcCount=1");
+                output.Add("RcRadius=0.000000000000000");
+                output.Add("Show=1");
+                output.Add("RcShow=0");
+                output.Add("SeaTemp=-32678.000000000000000");
+                output.Add("Depth=65535.000000000000000");
+                output.Add(string.Format(culture, "Time={0:0.000000000000000}", time));
+                output.Add($"GUID={guid}");
+                output.Add("");
+            }
+
+            // ---- WRITE ROUTES ----
+            for (int r = 0; r < validRoutes.Count; r++)
+            {
+                var rt = validRoutes[r];
+
+                output.Add($"[Rt{r}]");
+                output.Add($"Name={Helper.SanitizeName(rt.Name)}");
+                output.Add("Visible=1");
+                output.Add($"Guid=ROUTE-{r + 1:0000}");
+
+                for (int i = 0; i < rt.Points.Count; i++)
+                {
+                    string mkName = wpNameMap[rt.Points[i]];
+
+                    output.Add($"Mk{i}={mkName}");
+                    output.Add($"Cog{i}=0.000000000000000");
+                    output.Add($"Eta{i}=0.000000000000000");
+                    output.Add($"Length{i}=0.000000000000000");
+                    output.Add($"PredictedDrift{i}=0.000000000000000");
+                    output.Add($"PredictedSet{i}=0.000000000000000");
+                    output.Add($"PredictedSog{i}=0.000000000000000");
+                    output.Add($"PredictedTime{i}=0.000000000000000");
+                    output.Add($"PredictedTwa{i}=0.000000000000000");
+                    output.Add($"PredictedTwd{i}=0.000000000000000");
+                    output.Add($"PredictedTws{i}=0.000000000000000");
+                }
+
+                output.Add("");
+            }
+
+            File.WriteAllLines(outputPath, output);
+        }
+
         public static List<Wp> LoadWaypoints(string inputPath, CultureInfo culture)
         {
             var list = new List<Wp>();

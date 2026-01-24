@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Xml.Linq;
+using static RaymarineConverter.FileConverter;
 
 class Program
 {
@@ -28,7 +29,19 @@ class Program
         }
 
         var culture = CultureInfo.InvariantCulture;
-        var waypoints = FileConverter.LoadWaypoints(inputPath, culture);
+        List<Wp> waypoints;
+        List<Route> routes = new();
+
+        if (Path.GetExtension(inputPath).Equals(".gpx", StringComparison.OrdinalIgnoreCase))
+        {
+            var gpx = FileConverter.LoadGpx(inputPath, culture);
+            waypoints = gpx.Waypoints;
+            routes = gpx.Routes;
+        }
+        else
+        {
+            waypoints = FileConverter.LoadWaypoints(inputPath, culture);
+        }
 
         if (waypoints.Count == 0)
         {
@@ -42,12 +55,13 @@ class Program
 
         if (outExt == ".rwf")
         {
-            Console.Write("Generate route in file order? (y/n): ");
-            var key = Console.ReadKey();
-            Console.WriteLine();
-            includeRoute = key.KeyChar is 'y' or 'Y';
+            //Console.Write("Generate route in file order? (y/n): ");
+            //var key = Console.ReadKey();
+            //Console.WriteLine();
+            //includeRoute = key.KeyChar is 'y' or 'Y';
 
-            FileConverter.WriteRwf(outputPath, waypointGroupName, waypoints, includeRoute, culture);
+            //FileConverter.WriteRwf(outputPath, waypointGroupName, waypoints, includeRoute, culture);
+            FileConverter.WriteRwfSeperateRoutes(outputPath, waypointGroupName,waypoints, routes, culture);
         }
         else if (outExt == ".fsh")
         {
@@ -61,6 +75,7 @@ class Program
         else
         {
             FileConverter.WriteRaytechTxt(outputPath, waypointGroupName, waypoints, culture);
+            //FileConverter.WriteRaytechTxtWithRoutes(outputPath, waypointGroupName, waypoints, routes, culture);
         }
 
         Console.WriteLine($"Done! Wrote {waypoints.Count} waypoint(s) to {outputPath}");
