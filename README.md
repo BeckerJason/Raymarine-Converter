@@ -13,3 +13,7 @@ Convert Files to Raymarine readable Files
 - Import from File
 - Import from Comma Delimited File (even though the files are .TXT)
 - Select your TXT file
+
+
+### Notes
+I used https://www.gpsvisualizer.com/ To convert from the initial ADM file to GPX
