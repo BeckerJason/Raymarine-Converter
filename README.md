@@ -19,7 +19,8 @@ Convert Files to Raymarine readable Files
 The goal of this software was to go from Garmin to Raymarine C90
 
 I did: 
-- Export from Garmin to GPX
+- Export from Garmin to ADM (if it cant do GPX)
+- Convert from ADM to GPX with https://www.gpsvisualizer.com/
 - Convert from GPX to WayPoint and Routes GPX in BaseCamp
 - Convert from GPX to TXT with RaymarineConverter
 - Convert from TXT to FSH in RayTech Navigator
