@@ -22,8 +22,8 @@ I did:
 - Export from Garmin to ADM (if it cant do GPX)
 - Convert from ADM to GPX with https://www.gpsvisualizer.com/
 - Convert from GPX to WayPoint and Routes GPX in BaseCamp
-- Convert from GPX to TXT with RaymarineConverter
-- Convert from TXT to FSH in RayTech Navigator
+- Convert from GPX to RWF with RaymarineConverter
+- Convert from RWF to FSH in RayTech Navigator
 
 ### Notes
 I used https://www.gpsvisualizer.com/ To convert from the initial ADM file to GPX

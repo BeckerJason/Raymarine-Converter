@@ -42,5 +42,42 @@ namespace RaymarineConverter
 
             return name.Replace(",", " ");
         }
+        public static string MakeUniqueName(
+    string name,
+    int number,
+    ISet<string> usedNames)
+        {
+            name = SanitizeName(name);
+
+            string suffix = $"-{number:000}";
+            int maxBaseLength = 16 - suffix.Length;
+
+            if (maxBaseLength < 1)
+                throw new InvalidOperationException("Suffix is too long.");
+
+            string baseName = name;
+
+            if (baseName.Length > maxBaseLength)
+                baseName = baseName.Substring(0, maxBaseLength);
+
+            string candidate = baseName + suffix;
+
+            while (usedNames.Contains(candidate))
+            {
+                number++;
+                suffix = $"-{number:000}";
+                maxBaseLength = 16 - suffix.Length;
+
+                baseName = name;
+
+                if (baseName.Length > maxBaseLength)
+                    baseName = baseName.Substring(0, maxBaseLength);
+
+                candidate = baseName + suffix;
+            }
+
+            usedNames.Add(candidate);
+            return candidate;
+        }
     }
 }

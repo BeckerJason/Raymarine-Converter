@@ -43,9 +43,9 @@ class Program
             waypoints = FileConverter.LoadWaypoints(inputPath, culture);
         }
 
-        if (waypoints.Count == 0)
+        if (waypoints.Count == 0&& routes.Count == 0)
         {
-            Console.WriteLine("No waypoints found in input.");
+            Console.WriteLine("No waypoints or routes found in input.");
             return;
         }
 
@@ -78,7 +78,12 @@ class Program
             //FileConverter.WriteRaytechTxtWithRoutes(outputPath, waypointGroupName, waypoints, routes, culture);
         }
 
-        Console.WriteLine($"Done! Wrote {waypoints.Count} waypoint(s) to {outputPath}");
+        int routePointCount = routes.Sum(route => route.Points.Count);
+
+        Console.WriteLine(
+            $"Done! Wrote {waypoints.Count} standalone waypoint(s), " +
+            $"{routes.Count} route(s), and {routePointCount} route point(s) " +
+            $"to {outputPath}");
     }
 
     

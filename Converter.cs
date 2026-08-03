@@ -355,22 +355,23 @@ namespace RaymarineConverter
 
             // ---- ASSIGN STABLE WAYPOINT NAMES ----
             var wpNameMap = new Dictionary<Wp, string>();
+            var usedNames = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+
             int wpIndex = 1;
 
             foreach (var wp in routeWaypoints)
             {
-                if (!wpNameMap.ContainsKey(wp))
-                {
-                    // Ensure name uniqueness & RayTech safety
-                    string baseName = Helper.SanitizeName(wp.Name);
-                    string finalName = baseName;
+                if (wpNameMap.ContainsKey(wp))
+                    continue;
 
-                    if (wpNameMap.Values.Contains(finalName))
-                        finalName = $"{baseName}-{wpIndex:000}";
+                string finalName = Helper.MakeUniqueName(
+                    wp.Name,
+                    wpIndex,
+                    usedNames);
 
-                    wpNameMap[wp] = finalName;
-                    wpIndex++;
-                }
+                wpNameMap[wp] = finalName;
+                wpIndex++;
             }
 
             // ---- WRITE WAYPOINTS FIRST ----
